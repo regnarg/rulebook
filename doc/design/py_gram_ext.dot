@@ -1,0 +1,29 @@
+digraph PyGram {
+    source [label="Source Code"];
+    tokens [label="Token Stream"];
+    cst [label="Parse Tree (CST)"];
+    ast [label="Abstract Syntax Tree (AST)"];
+    code [label="Code Object"];
+    bytecode [label="Serialized Bytecode"];
+    pyc [label="``.pyc`` File"];
+
+    //graph[rankdir=LR];
+
+    source -> tokens [label="tokenize.tokenize",type=pymod];
+    tokens -> source [label="tokenize.untokenize",type=pymod];
+    source -> tokens [label="EasyExtend StdTokenizer",type=pymod,ext=1,own=1];
+    tokens -> cst [label="EasyExtend DFAParser", type=pymod,ext=1,own=1];
+
+    source -> cst [label="PyParse_* (C)",type=capi];
+    source -> cst [label="parser.*", type=extmod];
+    cst -> ast [label="PyAST_FromNode (C)", type=capi];
+    ast -> code [label="PyAST_CompileObject (C)", type=capi];
+
+    cst -> code [label="parser.compilest", type=extmod];
+    ast -> code [label="compile()", type=extmod];
+    source -> code[label="compile()", type=extmod];
+    source -> ast[label="ast.parse", type=extmod];
+
+    code -> bytecode[label="marshal.dump", type=extmod];
+    bytecode -> pyc[label="(manually add\nsimple header)", type=pymod];
+}
