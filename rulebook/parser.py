@@ -5,7 +5,7 @@ from functools import partial
 
 from tokenize import tokenize,untokenize,TokenInfo
 import tokenize as t
-from . import ast
+from . import ast as rbkast
 import ast as pyast
 
 if os.environ.get('RULEBOOK_DEBUG'):
@@ -107,6 +107,11 @@ class Parser:
                     # The expression cannot end until all of them are closed.
                     # This allows corect handling of e.g. ':'s inside  ``{'key': 'val'}``
                     # so that they don't terminate the expession.
+                    #
+                    # NB: This is not perfect. It doesn't correctly parse e.g.
+                    # the expression in  ``if lambda f: None:``. You probably shouldn't
+                    # write code like that anyway ;-). And if you must, parentheses are
+                    # your friend).
         while True:
             # NB: Newlines and indentaion INSIDE expressions (due to explicit and implicit
             # line continuations) DOES NOT generate NEWLINE, INDENT or DEDENT tokens.
@@ -190,10 +195,11 @@ class Parser:
 
         debug('parse_pyexpr: untokenized to\n    |' + src.replace('\n', '\n    |'))
 
+        node = pyast.parse(src, self.filename, 'eval').body
+
         # TODO: Line number are wrong in `src`. Therefore we must:
         #   * fix them up in the AST
         #   * tranform them in SyntaxErrors that might be raised by `pyast.parse`
-        node = pyast.parse(src, self.filename, 'eval')
 
         return node
 
@@ -204,21 +210,26 @@ class Parser:
             expr = self.parse_pyexpr([':'])
             self.eat(':')
             body = self.parse_body()
-            return ast.If(expr, body)
+            return rbkast.If(expr, body)
         else:
             stoppers = [t.NEWLINE, t.DEDENT, self.KW_PRIO, '=']
             expr = self.parse_pyexpr(stoppers)
             if self.match('='):
+                # TODO multi-target assignments (x = y = 42)
                 self.eat()
                 lhs = expr
+                if not hasattr(lhs, 'ctx'):
+                    self.syntax_error("Invalid lvalue")
+                lhs.ctx = pyast.Store()
                 rhs = self.parse_pyexpr(stoppers)
-                node = ast.Assign(lhs, rhs)
+                node = rbkast.Assign(lhs, rhs)
             else:
                 raise NotImplementedError
             while not self.match([t.NEWLINE, t.DEDENT]):
                 if self.match(self.KW_PRIO):
+                    self.eat()
                     # XXX allow non-constant priorities?
-                    prio = int(ast.literal_eval(self.parse_pyexpr(stoppers)))
+                    prio = int(pyast.literal_eval(self.parse_pyexpr(stoppers)))
                     node.prio = prio
                 else:
                     self.syntax_error("Unexpected token")
@@ -230,7 +241,7 @@ class Parser:
         while True:
             if self.peek().type in [t.DEDENT, t.ENDMARKER]: break
             r.append(self.parse_directive())
-        return r
+        return rbkast.Block(r)
 
     def parse_body(self):
         """Parse the body of a compound statement.
@@ -247,13 +258,18 @@ class Parser:
             self.syntax_error("Nesting of simple bodies (e.g. ``if x: if y: z``) is not allowed.")
         else:
             self.in_simple_body = True
-            r = [ self.parse_directive() ]
+            r = self.parse_directive()
             self.in_simple_body = False
             return r
 
+    def parse_rulebook(self):
+        body = self.parse_block()
+        return rbkast.Rulebook(body)
 
+def parse(*a):
+    return Parser(*a).parse_rulebook()
 
-__all__ = ['Parser']
+__all__ = ['Parser', 'parse', 'tokenize']
 
 if __name__ == '__main__':
     import sys
@@ -265,6 +281,6 @@ if __name__ == '__main__':
         fn = '<stdin>'
     p = Parser(file, fn)
     node = p.parse_block()
-    print(repr(node))
+    rbkast.pprint(node)
 
 
