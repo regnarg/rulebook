@@ -1,6 +1,7 @@
 
 import sys
 import ast as pyast
+from .util import *
 from itertools import chain, repeat
 
 class Node(WithFields):

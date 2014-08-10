@@ -1,6 +1,7 @@
 
 from . import ast as rbkast, pyast_tools
 import ast as pyast
+import builtins
 
 def _nsify(node):
     class _NsifyTransformer(pyast.NodeTransformer):
@@ -11,7 +12,7 @@ def _nsify(node):
                 return super().generic_visit(node)
         def visit(self, node):
             if isinstance(node, pyast.Name) and not (node.id.startswith('_') and not node.id.startswith('__')):
-                nn=pyast.Name('ns', pyast.Load())
+                nn=pyast.Attribute(Compiler.CTX, 'ns', pyast.Load())
                 pyast.copy_location(nn, node)
                 na=pyast.Attribute(nn, node.id, node.ctx)
                 pyast.copy_location(na, node)
@@ -21,6 +22,7 @@ def _nsify(node):
     return _NsifyTransformer().visit(node)
 
 class Compiler:
+    CTX = pyast_tools.dotted('C')
     def transform_node(self, node):
         """Transform a Rulebook AST node to corresponding Python code (represented as AST)."""
         for cls in type(node).__mro__:
@@ -61,22 +63,43 @@ class Compiler:
             # I was surprised just like you; try this: ``[x,y] = [4,2]``).
             raise NotImplementedError("Unsupported assignment LHS: %s", pyast.dump(lhs))
 
-        pynode = pyast_tools.build_call('_rbkapi.Assign', self._wrap_lambda(obj),
+        pynode = self._build_directive('Assign', self._wrap_lambda(obj),
                                         subtype, subval, self._wrap_lambda(rhs), prio=node.prio)
         return pynode
 
     def _xform_block(self, node):
         pynodes = [ self.transform_node(directive) for directive in node.body ]
-        return pyast_tools.build_call('_rbkapi.Block', pyast.List(pynodes, pyast.Load()))
+        return self._build_directive('Block', pyast.List(pynodes, pyast.Load()))
 
     def _xform_if(self, node):
-        return pyast_tools.build_call('_rbkapi.If', self._wrap_lambda(node.cond),
+        return self._build_directive('If', self._wrap_lambda(node.cond),
                                         self.transform_node(node.body))
 
     def _xform_rulebook(self, node):
         body_pynode = self.transform_node(node.body)
-        return pyast.Module([pyast.Assign([pyast.Name('root', pyast.Store())], body_pynode)])
+        @pyast_tools.interpolate(ROOT=body_pynode)
+        @pyast_tools.get_ast
+        def module_body():
+            from rulebook import runtime as R
+            def init(ctx):
+                C = ctx
+                return ROOT
 
+        #return pyast.Module([pyast.Assign([pyast.Name('root', pyast.Store())], body_pynode)])
+        return pyast.Module(module_body)
+
+    def _build_directive(self, name, *args, **kw):
+        return pyast_tools.build_call('R.'+name, self.CTX, *args, **kw)
+
+def compile(source_or_ast, filename=None):
+    if not isinstance(source_or_ast, rbkast.Node):
+        from . import parser
+        source_or_ast = parser.parse(source_or_ast, filename)
+    compiler = Compiler()
+    node = compiler.transform_node(source_or_ast)
+    node = pyast.fix_missing_locations(node)
+    code = builtins.compile(node, filename, 'exec')
+    return code
 
 __all__ = ['Compiler', 'compile']
 
