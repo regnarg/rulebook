@@ -1,5 +1,6 @@
 
 from . import ast as rbkast, pyast_tools
+from .util import *
 import ast as pyast
 import builtins
 
@@ -12,7 +13,8 @@ def _nsify(node):
                 return super().generic_visit(node)
         def visit(self, node):
             if isinstance(node, pyast.Name) and not (node.id.startswith('_') and not node.id.startswith('__')):
-                nn=pyast.Attribute(Compiler.CTX, 'ns', pyast.Load())
+                #nn=pyast.Attribute(Compiler.CTX, 'nswrap', pyast.Load())
+                nn = pyast_tools.dotted('N')
                 pyast.copy_location(nn, node)
                 na=pyast.Attribute(nn, node.id, node.ctx)
                 pyast.copy_location(na, node)
@@ -36,7 +38,16 @@ class Compiler:
         immediately but at the appropriate time (e.g. what a directive
         is activated."""
 
-        return pyast.Lambda(pyast_tools.EMPTY_SIG, expr)
+        r = pyast.Lambda(pyast_tools.EMPTY_SIG, expr)
+        if debug_enabled:
+            try:
+                import astunparse
+            except ImportError:
+                pass
+            else:
+                src = astunparse.unparse(expr).strip()
+                r = pyast_tools.build_call('R._LambdaWithSource', r, src)
+        return r
 
     def _xform_assign(self, node):
         lhs = _nsify(node.lhs)
@@ -72,7 +83,7 @@ class Compiler:
         return self._build_directive('Block', pyast.List(pynodes, pyast.Load()))
 
     def _xform_if(self, node):
-        return self._build_directive('If', self._wrap_lambda(node.cond),
+        return self._build_directive('If', self._wrap_lambda(_nsify(node.cond)),
                                         self.transform_node(node.body))
 
     def _xform_rulebook(self, node):
@@ -83,6 +94,7 @@ class Compiler:
             from rulebook import runtime as R
             def init(ctx):
                 C = ctx
+                N = ctx.nswrap
                 return ROOT
 
         #return pyast.Module([pyast.Assign([pyast.Name('root', pyast.Store())], body_pynode)])

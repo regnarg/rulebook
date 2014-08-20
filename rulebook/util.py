@@ -1,5 +1,26 @@
 import itertools
 
+import sys, os
+debug_enabled = os.environ.get('RULEBOOK_DEBUG')
+if debug_enabled:
+    from functools import partial
+    debug = partial(print, '[rbk]', file=sys.stderr)
+    trace_indent = 0
+    def tracefunc(frame, event, arg):
+        global trace_indent
+        if 'rulebook' in frame.f_globals.get('__name__', ''):
+            if event == "call":
+                trace_indent += 2
+                debug("-" * trace_indent + "> call function", frame.f_code.co_name)
+            elif event == "return":
+                debug("<" + "-" * trace_indent, "exit function", frame.f_code.co_name)
+                trace_indent -= 2
+        return tracefunc
+
+    #sys.settrace(tracefunc)
+else:
+    debug = lambda *a,**kw: None
+
 class LateBindingProperty(property):
     """An unrelated but useful piece of code. Allows the following use case:
         class A(object):

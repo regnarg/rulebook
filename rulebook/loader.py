@@ -44,8 +44,19 @@ def load(filename, ctx = None):
     exec(code, vars, vars)
     root = vars['init'](ctx)
 
-    return root
+    return root, ctx
 
+def load_string(s, filename='<string>', ctx=None):
+    if ctx is None:
+        ctx = runtime.Context()
+
+    code = compiler.compile(s, filename)
+
+    vars = {}
+    exec(code, vars, vars)
+    root = vars['init'](ctx)
+
+    return root, ctx
 
 
 

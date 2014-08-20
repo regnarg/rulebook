@@ -1,22 +1,31 @@
 from functools import wraps
+from itertools import chain
+from .util import *
 
 class RuleAbider(object):
     def __init__(self):
-        self._trackers = {}
-        self._last_id = 0
+        self._rbk_trackers = {}
+        self._rbk_last_id = 0
     def __setattr__(self, name, val):
         super().__setattr__(name, val)
-        self._changed(name)
+        if not name.startswith('_'):
+            self._changed(name)
     def _changed(self, name):
-        for tracker in ( self._trackers.get(name, [])
-                        +self._trackers.get(None, []) ):
+        debug(self, '_changed', name, self._rbk_trackers)
+        for tracker in ( chain(self._rbk_trackers.get(name, {}).values(),
+                               self._rbk_trackers.get(None, {}).values()) ):
             tracker(self, name)
     def track(self, name, handler, ident=None):
-        self._trackers.setdefault(name, {})[ident] = handler
+        if ident is None:
+            self._rbk_last_id += 1
+            ident = self._rbk_last_id
+        debug(self, 'track', name)
+        self._rbk_trackers.setdefault(name, {})[ident] = handler
+        return ident
 
     def untrack(self, name, ident):
         try:
-            del self._trackers.get(name, {})[ident]
+            del self._rbk_trackers.get(name, {})[ident]
         except KeyError:
             pass
 

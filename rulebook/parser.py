@@ -8,13 +8,9 @@ import tokenize as t
 from . import ast as rbkast
 import ast as pyast
 
-if os.environ.get('RULEBOOK_DEBUG'):
-    debug = partial(print, '[rbk-parser]', file=sys.stderr)
-else:
-    debug = lambda *a,**kw: None
+from .util import *
 
-
-def tokenize(arg):
+def tokenize(arg, ensure_newline=False):
     """A simpler interface to the ``tokenize.tokenize`` function.
     Accepts string and file objects as input."""
     if isinstance(arg, str):
@@ -27,7 +23,16 @@ def tokenize(arg):
     if hasattr(arg, 'read'):
         arg = arg.readline
     if callable(arg):
-        arg = t.tokenize(arg)
+        orig_readline = arg
+        if ensure_newline:
+            def readline():
+                r = orig_readline()
+                # Absence of a final newline breaks the tokenizer
+                if r and not r.endswith(b'\n'): return r + b'\n'
+                else: return r
+        else:
+            readline = orig_readline
+        arg = t.tokenize(readline)
     arg = list(arg)
     return arg
 
@@ -47,7 +52,7 @@ class Parser:
         readline = None
         if inp is None:
             inp = open(filename, 'rb')
-        self.tokens = tokenize(inp)
+        self.tokens = tokenize(inp, ensure_newline=True)
         self.filename = filename
         self.pos = 0
 
@@ -191,6 +196,7 @@ class Parser:
             newtok[3] = (tok.end[0] - first_line + 1, 0 if idx==0 else tok.end[1])
             tokens[idx] = TokenInfo(*newtok)
 
+        debug('parse_pyexpr: tokens =', tokens)
         src = untokenize(tokens)
 
         debug('parse_pyexpr: untokenized to\n    |' + src.replace('\n', '\n    |'))
