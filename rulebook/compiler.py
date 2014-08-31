@@ -7,6 +7,7 @@ import builtins
 def _nsify(node):
     class _NsifyTransformer(pyast.NodeTransformer):
         def generic_visit(self, node):
+            if node is None: return
             if isinstance(node, (list, tuple)):
                 return type(node)(self.visit(i) for i in node)
             else:
@@ -25,6 +26,11 @@ def _nsify(node):
 
 class Compiler:
     CTX = pyast_tools.dotted('C')
+    last_id = 0
+    def gen_name(self, prefix='x'):
+        self.last_id += 1
+        return prefix + str(self.last_id)
+
     def transform_node(self, node):
         """Transform a Rulebook AST node to corresponding Python code (represented as AST)."""
         for cls in type(node).__mro__:
@@ -86,15 +92,24 @@ class Compiler:
         return self._build_directive('If', self._wrap_lambda(_nsify(node.cond)),
                                         self.transform_node(node.body))
 
+    def _xform_enterleave(self, node):
+        body = _nsify(node.body)
+        name = self.gen_name(node.event)
+        func = pyast.FunctionDef(name, pyast_tools.EMPTY_SIG, body, [], None)
+        self.defs.append(func)
+        return self._build_directive('EnterLeave', node.event, pyast_tools.dotted(name))
+
     def _xform_rulebook(self, node):
+        self.defs = []
         body_pynode = self.transform_node(node.body)
-        @pyast_tools.interpolate(ROOT=body_pynode)
+        @pyast_tools.interpolate(ROOT=body_pynode, DEFS=self.defs)
         @pyast_tools.get_ast
         def module_body():
             from rulebook import runtime as R
             def init(ctx):
                 C = ctx
                 N = ctx.nswrap
+                DEFS
                 return ROOT
 
         #return pyast.Module([pyast.Assign([pyast.Name('root', pyast.Store())], body_pynode)])

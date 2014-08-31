@@ -7,6 +7,9 @@ class RuleAbider(object):
         self._rbk_trackers = {}
         self._rbk_last_id = 0
     def __setattr__(self, name, val):
+        # TODO: track setters (set_*)
+        ## if isinstance(val, list): #TODO
+        ##     val =
         super().__setattr__(name, val)
         if not name.startswith('_'):
             self._changed(name)

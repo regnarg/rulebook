@@ -89,8 +89,13 @@ class If(Node):
     FIELDS_OPT = ['else']
 
 class Assign(Node):
-    FIELDS_REQ = [ 'lhs', 'rhs' ]
-    FIELDS_OPT = [ 'prio' ]
+    FIELDS_REQ = ['lhs', 'rhs']
+    FIELDS_OPT = ['prio']
 
 class Rulebook(Node):
-    FIELDS_REQ = [ 'body' ]
+    FIELDS_REQ = ['body']
+
+class EnterLeave(Node):
+    ENTER = 'enter'
+    LEAVE = 'leave'
+    FIELDS_REQ = ['event', 'body']

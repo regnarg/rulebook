@@ -50,16 +50,16 @@ def test_prio_simple():
     root.set_active(True)
     assert ctx.ns.x == 100
 
-# def test_if():
-#     root,ctx = load_string('''
-#         b = False
-#         if a:
-#             b = True prio 10
-#     ''')
-#     ctx.ns.a = False
-#
-#     root.set_active(True)
-#     assert ctx.ns.b == False
-#
-#     ctx.ns.a = True
-#     assert ctx.ns.b == True
+def test_if():
+    root,ctx = load_string('''
+        b = False
+        if a:
+            b = True prio 10
+    ''')
+    ctx.ns.a = False
+
+    root.set_active(True)
+    assert ctx.ns.b == False
+
+    ctx.ns.a = True
+    assert ctx.ns.b == True

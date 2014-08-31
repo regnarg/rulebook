@@ -1,6 +1,10 @@
+import builtins
 from .abider import  *
 from .util import *
 import weakref
+
+import logging
+logger = logging.getLogger(__name__)
 
 class ObjectInfo:
     def __init__(self, ctx, obj):
@@ -22,7 +26,7 @@ class ObjectWrapper:
     def __getattr__(self, name):
         # TODO uncommited values (from value sets in self._rbk_info)
         # TODO track getters (get_*)
-        debug("REPORT_READ", self._rbk_obj, name)
+        logger.debug("REPORT_READ %s %s", self._rbk_obj, name)
         self._rbk_ctx._report_read((self._rbk_obj, 'attr', name))
         val = getattr(self._rbk_obj, name)
         # TODO explain condition
@@ -102,7 +106,7 @@ class Context:
     def _value_set_changed(self, target):
         if isinstance(target[0], ObjectWrapper): target = (target[0]._rbk_obj,) + target[1:]
         vals = self._value_set(target)
-        debug('VALSET', target, vals)
+        logger.debug('VALSET %s %s', target, vals)
 
         if vals:
             eff = get_effective_value(vals)
@@ -147,7 +151,7 @@ class Context:
     ### CHANGE TRACKING (WATCHES) {{{ ###
 
     def add_watchset(self, watches, func, ident=None):
-        debug('ADD_WATCHSET', watches, func, ident)
+        logger.debug('ADD_WATCHSET %s %s %s', watches, func, ident)
         if ident is None: ident = self.new_id()
         if ident in self._watchsets: self.remove_watchset(ident)
         subwatches = []
@@ -173,6 +177,8 @@ class Context:
     ### }}} ###
 
 class Namespace(RuleAbider):
+    def __getattr__(self, name):
+        return getattr(builtins, name)
     def __repr__(self):
         return 'N'
 
@@ -201,33 +207,47 @@ class If(Directive):
     FIELDS_OPT = ['orelse']
     def _set_active(self, active):
         if active:
-            val, deps = self.ctx.tracked_eval(self.cond)
-            self.body.set_active(val)
-            if self.orelse:
-                self.orelse.set_active(not val)
+            self._on_changed()
         else:
             self.body.set_active(False)
             if self.orelse:
                 self.orelse.set_active(False)
+            self.ctx.remove_watchset(id(self))
+
+    def _on_changed(self, *a):
+        val, deps = self.ctx.tracked_eval(self.cond)
+        val = bool(val)
+        logger.debug('IFCHG %s %s', self, val)
+        self.body.set_active(val)
+        if self.orelse:
+            self.orelse.set_active(not val)
+        self.ctx.add_watchset(deps,    self._on_changed, id(self))
+
+class EnterLeave(Directive):
+    FIELDS_REQ = ['event', 'body']
+
+    def _set_active(self, active):
+        if active == (self.event == 'enter'):
+            self.body()
 
 class Assign(Directive):
     FIELDS_REQ = [ 'obj', 'subtype', 'subval', 'rhs', 'prio' ]
     cur_obj = None
 
     def _set_active(self, active):
-        debug(self, '_set_active', active)
+        logger.debug('%s %s', 'ACTIVATE' if active else 'DEACTIVATE', self)
         if active:
             self._on_changed()
         else:
             self._unset()
 
     def _unset(self):
-        debug('UNSET', self)
+        logger.debug('UNSET %s', self)
         if self.cur_obj is None: return
         cur_obj = self.cur_obj()
         if cur_obj is None: return
         target = (cur_obj, self.subtype, self.subval)
-        debug('UNSET2', target)
+        logger.debug('UNSET2 %s', target)
         self.ctx.remove_value(target, id(self))
         self.ctx.remove_watchset((id(self), 'obj'))
         self.ctx.remove_watchset((id(self), 'rhs'))
@@ -240,7 +260,7 @@ class Assign(Directive):
         if self.cur_obj is None: cur_obj = None
         else: cur_obj = self.cur_obj()
 
-        debug('CHANGED', self, cur_obj, obj)
+        logger.debug('CHANGED %s %s %s', self, cur_obj, obj)
 
         if obj is not cur_obj:
             # LHS changed, we must remove the attribute from the old object
@@ -248,7 +268,6 @@ class Assign(Directive):
             self._unset()
 
         target = (obj, self.subtype, self.subval)
-        debug(self, '_on_changed', target, val)
         self.ctx.add_value(target, val, self.prio or 0, id(self))
         self.ctx.add_watchset(objdeps, self._on_changed, (id(self), 'obj'))
         self.ctx.add_watchset(deps,    self._on_changed, (id(self), 'rhs'))

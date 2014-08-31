@@ -39,12 +39,14 @@ def tokenize(arg, ensure_newline=False):
 class Parser:
     # NL is used for ignored newlines in explicit and implicit line continuations
     # (as opposed to NEWLINE which signifies the end of a command). See the note
-    # in ``parse_pyexpr`` for details.
-    IGNORE = [ t.ENCODING, t.NL, t.COMMENT ]
-    PARENS = { '(': ')', '[': ']', '{': '}' }
+    # in ``parse_pycode`` for details.
+    IGNORE = [t.ENCODING, t.NL, t.COMMENT]
+    PY_BALANCE = {'(': ')', '[': ']', '{': '}', t.INDENT: t.DEDENT}
 
     KW_PRIO = (t.NAME, 'prio')
     KW_IF = (t.NAME, 'if')
+    KW_ENTER = (t.NAME, 'enter')
+    KW_LEAVE = (t.NAME, 'leave')
 
     in_simple_body = False
 
@@ -106,8 +108,9 @@ class Parser:
 
     ### INDIVIDUAL RECURSIVE DESCENT PARSING FUNCTIONS ###
 
-    def eat_pyexpr(self, endtoks):
-        expr_toks = []
+    def eat_pycode(self, endtoks):
+        """Eat a Python expression, statement or block (depending on `endtoks`)"""
+        ret = []
         parens = [] # A stack of open parentheses and other tookens that come in pairs.
                     # The expression cannot end until all of them are closed.
                     # This allows corect handling of e.g. ':'s inside  ``{'key': 'val'}``
@@ -142,23 +145,24 @@ class Parser:
             if self.match(endtoks) and not parens:
                 # The end token (e.g. a ':') is not a part of the expr, don't eat it)
                 break
-            elif self.match([t.NEWLINE, t.DEDENT]):
-                self.syntax_error("Premature end of expression, expected " + str(endtoks))
-            if self.match(self.PARENS.keys()):
-                parens.append(self.PARENS[self.peek().string])
-            elif parens and self.match(parens[-1]):
-                parens.pop()
-            expr_toks.append(self.eat())
-        return expr_toks
+            for opening, closing in self.PY_BALANCE.items():
+                if self.match(opening):
+                    parens.append(closing)
+                    break
+            else:
+                if parens and self.match(parens[-1]):
+                    parens.pop()
+            ret.append(self.eat())
+        return ret
 
-    def parse_pyexpr(self, endtoks):
+    def parse_pycode(self, endtoks, mode):
         """Parse a Python expression starting at the current position in the token stream.
         The expression ends with the first occurence of any token from ``endtoks``, which
         does not become a part of the expression and is not eaten.
 
         Return the AST of the expression."""
 
-        tokens = self.eat_pyexpr(endtoks)
+        tokens = self.eat_pycode(endtoks)
         # Unfortunately, token streams cannot be parsed into ASTs from Python.
         # We must convert the tokens back to source code first.
         # See ``docs/desing/parser.md`` for more info.
@@ -196,12 +200,12 @@ class Parser:
             newtok[3] = (tok.end[0] - first_line + 1, 0 if idx==0 else tok.end[1])
             tokens[idx] = TokenInfo(*newtok)
 
-        debug('parse_pyexpr: tokens =', tokens)
+        debug('parse_pycode: tokens =', tokens)
         src = untokenize(tokens)
 
-        debug('parse_pyexpr: untokenized to\n    |' + src.replace('\n', '\n    |'))
+        debug('parse_pycode: untokenized to\n    |' + src.replace('\n', '\n    |'))
 
-        node = pyast.parse(src, self.filename, 'eval').body
+        node = pyast.parse(src, self.filename, mode).body
 
         # TODO: Line number are wrong in `src`. Therefore we must:
         #   * fix them up in the AST
@@ -213,13 +217,20 @@ class Parser:
         debug('parse_directive', self.peek())
         if self.match(self.KW_IF):
             self.eat()
-            expr = self.parse_pyexpr([':'])
-            self.eat(':')
+            expr = self.parse_pycode([':', t.NEWLINE], 'eval')
+            self.eat(':') # if it stopped at NEWLINE, this throws SyntaxError
             body = self.parse_body()
             return rbkast.If(expr, body)
+        elif self.match([self.KW_ENTER, self.KW_LEAVE]):
+            if self.match(self.KW_ENTER): event = 'enter'
+            else: event = 'leave'
+            self.eat()
+            self.eat(':')
+            body = self.parse_pybody()
+            return rbkast.EnterLeave(event, body)
         else:
             stoppers = [t.NEWLINE, t.DEDENT, self.KW_PRIO, '=']
-            expr = self.parse_pyexpr(stoppers)
+            expr = self.parse_pycode(stoppers, 'eval')
             if self.match('='):
                 # TODO multi-target assignments (x = y = 42)
                 self.eat()
@@ -227,7 +238,7 @@ class Parser:
                 if not hasattr(lhs, 'ctx'):
                     self.syntax_error("Invalid lvalue")
                 lhs.ctx = pyast.Store()
-                rhs = self.parse_pyexpr(stoppers)
+                rhs = self.parse_pycode(stoppers, 'eval')
                 node = rbkast.Assign(lhs, rhs)
             else:
                 raise NotImplementedError
@@ -235,7 +246,7 @@ class Parser:
                 if self.match(self.KW_PRIO):
                     self.eat()
                     # XXX allow non-constant priorities?
-                    prio = int(pyast.literal_eval(self.parse_pyexpr(stoppers)))
+                    prio = int(pyast.literal_eval(self.parse_pycode(stoppers, 'eval')))
                     node.prio = prio
                 else:
                     self.syntax_error("Unexpected token")
@@ -249,24 +260,31 @@ class Parser:
             r.append(self.parse_directive())
         return rbkast.Block(r)
 
-    def parse_body(self):
+    def parse_body(self, parse_directive=None, parse_block=None):
         """Parse the body of a compound statement.
         That is either a single statement followed by a NEWLINE or a block enclosed
         in matching INDENT...DEDENT tokens."""
 
+        if parse_directive is None: parse_directive = self.parse_directive
+        if parse_block is None: parse_block = self.parse_block
+
         if self.match(t.NEWLINE):
             self.eat()
             self.eat(t.INDENT)
-            body = self.parse_block()
+            body = parse_block()
             self.eat(t.DEDENT)
             return body
         elif self.in_simple_body:
             self.syntax_error("Nesting of simple bodies (e.g. ``if x: if y: z``) is not allowed.")
         else:
             self.in_simple_body = True
-            r = self.parse_directive()
+            r = parse_directive()
             self.in_simple_body = False
             return r
+
+    def parse_pybody(self):
+        return self.parse_body(partial(self.parse_pycode, [t.NEWLINE], 'exec'),
+                               partial(self.parse_pycode, [t.DEDENT], 'exec'))
 
     def parse_rulebook(self):
         body = self.parse_block()
