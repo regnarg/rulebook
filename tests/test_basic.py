@@ -26,7 +26,7 @@ def test_assign_lhs_change():
        obj2.x = 0
        obj.x = 42 prio 5
     ''')
-    obj1, obj2 = TestObj('obj1'), TestObj('obj2')
+    obj1, obj2 = DummyObj('obj1'), DummyObj('obj2')
     # ctx.add_value((obj1, 'attr', 'x'), 0, 0, 'default')
     # ctx.add_value((obj2, 'attr', 'x'), 0, 0, 'default')
     ctx.ns.obj1 = obj1
@@ -50,6 +50,18 @@ def test_prio_simple():
     root.set_active(True)
     assert ctx.ns.x == 100
 
+def test_prio_dynamic():
+    root,ctx = load_string('''
+        x = 0 prio 0
+        x = 1 prio myprio
+    ''')
+    ctx.ns.myprio = 100
+    root.set_active(True)
+    assert ctx.ns.x == 1
+    ctx.ns.myprio = -100
+    assert ctx.ns.x == 0
+
+
 def test_if():
     root,ctx = load_string('''
         b = False
@@ -69,7 +81,7 @@ def test_for():
         for itm in lst:
             itm.y = itm.x
     ''')
-    obj1, obj2 = TestObj('obj1'), TestObj('obj2')
+    obj1, obj2 = DummyObj('obj1'), DummyObj('obj2')
     obj1.x = 10
     obj2.x = 20
     ctx.ns.lst =  [obj1]
@@ -78,4 +90,5 @@ def test_for():
     ctx.ns.lst = [obj1, obj2]
     assert obj1.y == 10
     assert obj2.y == 20
+
 

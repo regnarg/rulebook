@@ -86,7 +86,8 @@ class Compiler:
             raise NotImplementedError("Unsupported assignment LHS: %s", pyast.dump(lhs))
 
         pynode = self._build_directive('Assign', self._wrap_lambda(obj),
-                                        subtype, subval, self._wrap_lambda(rhs), prio=node.prio)
+                                        subtype, subval, self._wrap_lambda(rhs),
+                                        prio=self._wrap_lambda(_nsify(node.prio)))
         return pynode
 
     def _xform_block(self, node):

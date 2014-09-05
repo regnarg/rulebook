@@ -12,7 +12,7 @@ def load_string(s):
     s = '\n'.join( line[indent:] for line in s.split('\n') )
     return loader.load_string(s)
 
-class TestObj(RuleAbider):
+class DummyObj(RuleAbider):
     '''A simple dummy object that is controlled by the test rulebooks.'''
     x = None
     def __init__(self, name):

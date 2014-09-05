@@ -109,7 +109,11 @@ class Context:
         obj, subtype, subname = target
         if isinstance(obj, ObjectWrapper): obj = obj._rbk_obj
         if subtype == 'attr':
-            setattr(obj, subname, val)
+            # Support the explicit setter idiom common in Python.
+            if hasattr(obj, 'set_' + subname):
+                getattr(obj, 'set_' + subname)(val)
+            else:
+                setattr(obj, subname, val)
         elif subtype == 'item':
             obj[subname] = val
         else:
@@ -314,7 +318,7 @@ class Assign(Directive):
     def _set_active(self, active):
         logger.debug('%s %s', 'ACTIVATE' if active else 'DEACTIVATE', self)
         if active:
-            self._on_changed()
+            self._on_changed(activating=True)
         else:
             self._unset()
 
@@ -326,13 +330,17 @@ class Assign(Directive):
         target = (cur_obj, self.subtype, self.subval)
         logger.debug('UNSET2 %s', target)
         self.ctx.remove_value(target, id(self))
-        self.ctx.remove_watchset((id(self), 'obj'))
-        self.ctx.remove_watchset((id(self), 'rhs'))
+        self.ctx.remove_watchset(id(self))
         self.cur_obj = None
 
-    def _on_changed(self, *a):
-        obj, objdeps = self.ctx.tracked_eval(self.obj)
-        val, deps    = self.ctx.tracked_eval(self.rhs)
+    def _on_changed(self, *a, activating=False):
+        if not (self.active or activating): return
+        obj, obj_deps = self.ctx.tracked_eval(self.obj)
+        val, val_deps    = self.ctx.tracked_eval(self.rhs)
+        if self.prio:
+            prio, prio_deps    = self.ctx.tracked_eval(self.prio)
+        else:
+            prio, prio_deps = 0, []
 
         if self.cur_obj is None: cur_obj = None
         else: cur_obj = self.cur_obj()
@@ -345,9 +353,8 @@ class Assign(Directive):
             self._unset()
 
         target = (obj, self.subtype, self.subval)
-        self.ctx.add_value(target, val, self.prio or 0, id(self))
-        self.ctx.add_watchset(objdeps, self._on_changed, (id(self), 'obj'))
-        self.ctx.add_watchset(deps,    self._on_changed, (id(self), 'rhs'))
+        self.ctx.add_value(target, val, prio, id(self))
+        self.ctx.add_watchset(obj_deps + val_deps + prio_deps, self._on_changed, id(self))
         self.cur_obj = weakref.ref(obj)
 
 class _LambdaWithSource:

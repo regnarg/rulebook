@@ -48,6 +48,7 @@ class Parser:
     KW_FOR = (t.NAME, 'for')
     KW_ENTER = (t.NAME, 'enter')
     KW_LEAVE = (t.NAME, 'leave')
+    KW_SET = (t.NAME, 'set')
 
     in_simple_body = False
 
@@ -58,6 +59,7 @@ class Parser:
         self.tokens = tokenize(inp, ensure_newline=True)
         self.filename = filename
         self.pos = 0
+        self.defaults = { 'prio': pyast.Num(0) }
 
     ### HELPER FUNCTIONS TO EASE TOKEN HANDLING ###
 
@@ -237,6 +239,14 @@ class Parser:
             self.eat(':')
             body = self.parse_pybody()
             return rbkast.EnterLeave(event, body)
+        elif self.match(self.KW_SET):
+            self.eat()
+            what = self.eat(t.NAME).string
+            if what == 'prio':
+                self.defaults['prio'] = self.parse_pycode([t.NEWLINE, t.DEDENT], 'eval')
+            else:
+                self.syntax_error("Unknown `set` directive: '%s'" % what)
+            return None
         else:
             stoppers = [t.NEWLINE, t.DEDENT, self.KW_PRIO, '=']
             expr = self.parse_pycode(stoppers, 'eval')
@@ -248,15 +258,14 @@ class Parser:
                     self.syntax_error("Invalid lvalue")
                 lhs.ctx = pyast.Store()
                 rhs = self.parse_pycode(stoppers, 'eval')
-                node = rbkast.Assign(lhs, rhs)
+                node = rbkast.Assign(lhs, rhs, prio = self.defaults['prio'])
             else:
                 raise NotImplementedError
             while not self.match([t.NEWLINE, t.DEDENT]):
                 if self.match(self.KW_PRIO):
                     self.eat()
-                    # XXX allow non-constant priorities?
-                    prio = int(pyast.literal_eval(self.parse_pycode(stoppers, 'eval')))
-                    node.prio = prio
+                    ## prio = int(pyast.literal_eval(self.parse_pycode(stoppers, 'eval')))
+                    node.prio = self.parse_pycode(stoppers, 'eval')
                 else:
                     self.syntax_error("Unexpected token")
             if self.match(t.NEWLINE): self.eat()
@@ -266,7 +275,10 @@ class Parser:
         r = []
         while True:
             if self.peek().type in [t.DEDENT, t.ENDMARKER]: break
-            r.append(self.parse_directive())
+            dir = self.parse_directive()
+            if dir is not None:
+                r.append(dir)
+            if self.match(t.NEWLINE): self.eat()
         return rbkast.Block(r)
 
     def parse_body(self, parse_directive=None, parse_block=None):

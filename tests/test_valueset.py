@@ -3,7 +3,7 @@ from testlib import *
 
 def test_add_remove():
     ctx = Context()
-    ctx.ns.obj = obj = TestObj('obj')
+    ctx.ns.obj = obj = DummyObj('obj')
     target = (obj, 'attr', 'x')
 
     normal_id = ctx.add_value(target, 'normal', 0)
