@@ -63,3 +63,19 @@ def test_if():
 
     ctx.ns.a = True
     assert ctx.ns.b == True
+
+def test_for():
+    root,ctx = load_string('''
+        for itm in lst:
+            itm.y = itm.x
+    ''')
+    obj1, obj2 = TestObj('obj1'), TestObj('obj2')
+    obj1.x = 10
+    obj2.x = 20
+    ctx.ns.lst =  [obj1]
+    root.set_active(True)
+    assert obj1.y == 10
+    ctx.ns.lst = [obj1, obj2]
+    assert obj1.y == 10
+    assert obj2.y == 20
+

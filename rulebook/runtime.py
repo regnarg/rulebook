@@ -29,11 +29,23 @@ class ObjectWrapper:
         logger.debug("REPORT_READ %s %s", self._rbk_obj, name)
         self._rbk_ctx._report_read((self._rbk_obj, 'attr', name))
         val = getattr(self._rbk_obj, name)
-        # TODO explain condition
+        # This condition serves two purposes:
+        #  (1) ObjectWrapper creates (via ObjectInfo) a weakref to the object, so
+        #      it has to be weakref-able.
+        #  (2) Types missing __weakref__ are usually simple ones like 'int'.
+        #      No point in wrapping those.
         if hasattr(val, '__weakref__'):
             return ObjectWrapper(self._rbk_ctx, val)
         else:
             return val
+
+    def __iter__(self):
+        self._rbk_ctx._report_read((self._rbk_obj, 'iter', None))
+        return map(partial(ObjectWrapper, self._rbk_ctx), iter(self._rbk_obj))
+
+    def __contains__(self, key):
+        self._rbk_ctx._report_read((self._rbk_obj, 'item', key))
+        return key in self._rbk_obj
 
     def __setattr__(self, name, val):
         return setattr(self._rbk_obj, name, val)
@@ -156,10 +168,7 @@ class Context:
         if ident in self._watchsets: self.remove_watchset(ident)
         subwatches = []
         for (obj, subtype, subname) in watches:
-            if subtype == 'attr':
-                subwatches.append((weakref.ref(obj), subtype, subname, obj.track(subname, func)))
-            else:
-                raise NotImplementedError
+            subwatches.append((weakref.ref(obj), subtype, subname, obj.track((subtype, subname), func)))
         self._watchsets[ident] = subwatches
 
 
@@ -181,6 +190,28 @@ class Namespace(RuleAbider):
         return getattr(builtins, name)
     def __repr__(self):
         return 'N'
+
+class NamespaceOverlay(object):
+    def __init__(self, base, overlay):
+        super().__init__()
+        self._base = base
+        self._overlay = overlay
+
+    def __getattr__(self, name):
+        if name.startswith('_'): raise AttributeError(name)
+        if name in self._overlay:
+            return self._overlay[name]
+        else:
+            return getattr(self._base, name)
+
+    def __setattr__(self, name, value):
+        if name.startswith('_'): return super().__setattr__(name, value)
+        if name in self._overlay:
+            #self._overlay[name] = value
+            raise AttributeError("Cannot change overlaid attribute %s"%name)
+        else:
+            setattr(self._base, name, value)
+        #self._changed(name)
 
 class Directive(WithFields):
     def __init__(self, ctx, *args, **kw):
@@ -207,14 +238,15 @@ class If(Directive):
     FIELDS_OPT = ['orelse']
     def _set_active(self, active):
         if active:
-            self._on_changed()
+            self._on_changed(activating=True)
         else:
             self.body.set_active(False)
             if self.orelse:
                 self.orelse.set_active(False)
             self.ctx.remove_watchset(id(self))
 
-    def _on_changed(self, *a):
+    def _on_changed(self, *a, activating=False):
+        if not (self.active or activating): return
         val, deps = self.ctx.tracked_eval(self.cond)
         val = bool(val)
         logger.debug('IFCHG %s %s', self, val)
@@ -222,6 +254,51 @@ class If(Directive):
         if self.orelse:
             self.orelse.set_active(not val)
         self.ctx.add_watchset(deps,    self._on_changed, id(self))
+
+class For(Directive):
+    FIELDS_REQ = ['iter', 'body_factory']
+
+    def __init__(self, *a, **kw):
+        super().__init__(*a, **kw)
+        self.cur_items = {}
+
+    def _set_active(self, active):
+        if active:
+            self._on_changed(activating=True)
+        else:
+            self.ctx.remove_watchset(id(self))
+            self._set_items([])
+
+    def _on_changed(self, *a, activating=False):
+        if not (self.active or activating): return
+        val, deps = self.ctx.tracked_eval(self.iter)
+        if isinstance(val, RuleAbider):
+            deps.append((val, 'iter', None))
+
+        self._set_items(val)
+        self.ctx.add_watchset(deps,    self._on_changed, id(self))
+
+
+    def _set_items(self, items):
+        by_id = { id(x): x for x in items }
+        new_ids = set(by_id.keys())
+        old_ids = set(self.cur_items.keys())
+
+        added = new_ids - old_ids
+        removed = old_ids - new_ids
+
+        for add_id in added:
+            item = by_id[add_id]
+            body = self.body_factory(item)
+            body.set_active(True)
+            self.cur_items[add_id] = item, body
+
+        for rm_id in removed:
+            item, body = self.cur_items[rm_id]
+            body.set_active(False)
+            del self.cur_items[rm_id]
+
+
 
 class EnterLeave(Directive):
     FIELDS_REQ = ['event', 'body']

@@ -3,8 +3,10 @@ from . import ast as rbkast, pyast_tools
 from .util import *
 import ast as pyast
 import builtins
+import copy
 
-def _nsify(node):
+def _nsify(node, base='N', isdict=False):
+    if isinstance(base, str): base = pyast_tools.dotted(base)
     class _NsifyTransformer(pyast.NodeTransformer):
         def generic_visit(self, node):
             if node is None: return
@@ -14,18 +16,21 @@ def _nsify(node):
                 return super().generic_visit(node)
         def visit(self, node):
             if isinstance(node, pyast.Name) and not (node.id.startswith('_') and not node.id.startswith('__')):
-                #nn=pyast.Attribute(Compiler.CTX, 'nswrap', pyast.Load())
-                nn = pyast_tools.dotted('N')
-                pyast.copy_location(nn, node)
-                na=pyast.Attribute(nn, node.id, node.ctx)
-                pyast.copy_location(na, node)
-                return na
+                newbase = copy.deepcopy(base)
+                pyast.copy_location(newbase, node)
+                if isdict:
+                    newnode = pyast.Subscript(newbase, pyast.Index(pyast.Str(node.id)), node.ctx)
+                else:
+                    newnode = pyast.Attribute(newbase, node.id, node.ctx)
+                pyast.copy_location(newnode, node)
+                return newnode
             else:
                 return self.generic_visit(node)
     return _NsifyTransformer().visit(node)
 
 class Compiler:
     CTX = pyast_tools.dotted('C')
+    NS_SIG = pyast.arguments([pyast.arg('N', None)],None,[],[],None, [])
     last_id = 0
     def gen_name(self, prefix='x'):
         self.last_id += 1
@@ -91,6 +96,38 @@ class Compiler:
     def _xform_if(self, node):
         return self._build_directive('If', self._wrap_lambda(_nsify(node.cond)),
                                         self.transform_node(node.body))
+
+    def _xform_for(self, node):
+        olddefs = self.defs
+        self.defs = []
+        try:
+            py_body = self.transform_node(node.body)
+        finally:
+            localdefs = self.defs
+            self.defs = olddefs
+        target = _nsify(node.target, '_overlay', True)
+        helper_name = self.gen_name('for')
+        @pyast_tools.interpolate(NAME=helper_name, TARGET=target, BODY=py_body, DEFS=localdefs)
+        @pyast_tools.single
+        @pyast_tools.get_ast
+        def localns_helper():
+            def NAME(iterval):
+                _overlay = {}
+                TARGET = iterval # Saves target variable(s) into _overlay
+                # The trick with _inner is there because in Python you cannot
+                # both load the value of a variable from an outer scope and
+                # assign to it in the inner one. The binding of a variable
+                # (local or outer) stays fixed for the whole duration of
+                # a function.
+                newns = R.ObjectWrapper(C, R.NamespaceOverlay(N._rbk_obj, _overlay))
+                def _inner(N):
+                    DEFS
+                    return BODY
+                return _inner(newns)
+        self.defs.append(localns_helper)
+        return self._build_directive('For', self._wrap_lambda(_nsify(node.iter)),
+                                        pyast.Name(helper_name, pyast.Load()))
+
 
     def _xform_enterleave(self, node):
         body = _nsify(node.body)

@@ -60,7 +60,7 @@ def get_ast(fun):
     except _Found as exc:
         node=exc.node
     else:
-        raise SyntaxError("AST node not found (not using `for name in get_ast()' syntax?")
+        raise SyntaxError("AST node not found (not used as a decorator?)")
     body=copy.deepcopy(node.body)
     base=body[0]
     rlv=_RelineVisitor(base.lineno, base.col_offset)

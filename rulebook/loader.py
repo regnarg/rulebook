@@ -32,6 +32,7 @@ def cache_from_source(path, debug_override=None):
     return os.path.join(head, '__pycache__', filename)
 
 def load(filename, ctx = None):
+    filename = str(filename)
     cache_fn = cache_from_source(filename)
     # TODO load compiled
 

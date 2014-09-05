@@ -45,6 +45,7 @@ class Parser:
 
     KW_PRIO = (t.NAME, 'prio')
     KW_IF = (t.NAME, 'if')
+    KW_FOR = (t.NAME, 'for')
     KW_ENTER = (t.NAME, 'enter')
     KW_LEAVE = (t.NAME, 'leave')
 
@@ -155,7 +156,7 @@ class Parser:
             ret.append(self.eat())
         return ret
 
-    def parse_pycode(self, endtoks, mode):
+    def parse_pycode(self, endtoks, mode, *, prepend='', append=''):
         """Parse a Python expression starting at the current position in the token stream.
         The expression ends with the first occurence of any token from ``endtoks``, which
         does not become a part of the expression and is not eaten.
@@ -201,7 +202,7 @@ class Parser:
             tokens[idx] = TokenInfo(*newtok)
 
         debug('parse_pycode: tokens =', tokens)
-        src = untokenize(tokens)
+        src = prepend + untokenize(tokens) + append
 
         debug('parse_pycode: untokenized to\n    |' + src.replace('\n', '\n    |'))
 
@@ -221,6 +222,14 @@ class Parser:
             self.eat(':') # if it stopped at NEWLINE, this throws SyntaxError
             body = self.parse_body()
             return rbkast.If(expr, body)
+        elif self.match(self.KW_FOR):
+            # (Ab)uses Python to parse the whole `for` header so that we don't
+            # have to bother with correctly splitting the individual parts,
+            # parsing the target expression in pyast.Store context, etc.
+            pynode = self.parse_pycode([':', t.NEWLINE, t.DEDENT, t.INDENT], 'exec', append=': pass')[0]
+            self.eat(':')
+            body = self.parse_body()
+            return rbkast.For(pynode.target, pynode.iter, body)
         elif self.match([self.KW_ENTER, self.KW_LEAVE]):
             if self.match(self.KW_ENTER): event = 'enter'
             else: event = 'leave'

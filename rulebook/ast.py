@@ -88,6 +88,9 @@ class If(Node):
     FIELDS_REQ = ['cond', 'body']
     FIELDS_OPT = ['else']
 
+class For(Node):
+    FIELDS_REQ = ['target', 'iter', 'body']
+
 class Assign(Node):
     FIELDS_REQ = ['lhs', 'rhs']
     FIELDS_OPT = ['prio']
