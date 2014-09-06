@@ -46,8 +46,7 @@ class Parser:
     KW_PRIO = (t.NAME, 'prio')
     KW_IF = (t.NAME, 'if')
     KW_FOR = (t.NAME, 'for')
-    KW_ENTER = (t.NAME, 'enter')
-    KW_LEAVE = (t.NAME, 'leave')
+    ENTERLEAVE_KEYWORDS = [ (t.NAME, kw) for kw in ('enter', 'leave', 'c_enter', 'c_leave') ]
     KW_SET = (t.NAME, 'set')
 
     in_simple_body = False
@@ -232,9 +231,8 @@ class Parser:
             self.eat(':')
             body = self.parse_body()
             return rbkast.For(pynode.target, pynode.iter, body)
-        elif self.match([self.KW_ENTER, self.KW_LEAVE]):
-            if self.match(self.KW_ENTER): event = 'enter'
-            else: event = 'leave'
+        elif self.match(self.ENTERLEAVE_KEYWORDS):
+            event = self.eat().string
             self.eat()
             self.eat(':')
             body = self.parse_pybody()

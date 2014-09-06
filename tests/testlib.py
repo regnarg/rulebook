@@ -5,6 +5,9 @@ from rulebook.abider import *
 from rulebook.runtime import *
 import re
 
+import logging
+logging.basicConfig(level=logging.DEBUG)
+
 INDENT_RE = re.compile(r'^\s*')
 def load_string(s):
     '''Strip any common indentation from a multi-line string.'''
