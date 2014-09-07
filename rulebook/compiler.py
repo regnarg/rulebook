@@ -120,7 +120,7 @@ class Compiler:
                 # assign to it in the inner one. The binding of a variable
                 # (local or outer) stays fixed for the whole duration of
                 # a function.
-                newns = R.ObjectWrapper(C, R.NamespaceOverlay(N._rbk_obj, _overlay))
+                newns = R.NamespaceOverlay(C, N, _overlay)
                 def _inner(N):
                     DEFS
                     return BODY

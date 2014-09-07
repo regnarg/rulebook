@@ -55,6 +55,8 @@ class Context:
     # The maximum length of an event chain before the rulebook is considered oscillating
     # and an exception is raised.
     MAX_CHAIN = 1000
+    # Types that don't need change tracking -- simple immutable builtin types
+    UNTRACKED = (str, bool, int, tuple, float, complex, type(None))
     def __init__(self):
         self._last_id = 0
         self._readtrack_stack = []
@@ -91,11 +93,12 @@ class Context:
             return obj
 
     def _wrap(self, obj):
-        if hasattr(obj, '__hash__'):
-            # No need to track immutable objects
-            return obj
-        else:
+        if isinstance(obj, RuleAbider):
             return ObjectWrapper(self, obj)
+        else:
+            if not isinstance(obj, self.UNTRACKED):
+                logger.warn('Cannot track %r of type %s'%(obj, type(obj).__name__))
+            return obj
 
     ### VALUE SET MANIPULATION {{{ ###
 
@@ -284,8 +287,9 @@ class Namespace(RuleAbider):
         return 'N'
 
 class NamespaceOverlay(object):
-    def __init__(self, base, overlay):
+    def __init__(self, ctx, base, overlay):
         super().__init__()
+        self._ctx = ctx
         self._base = base
         self._overlay = overlay
 
@@ -294,7 +298,7 @@ class NamespaceOverlay(object):
         if name in self._overlay:
             return self._overlay[name]
         else:
-            return getattr(self._base, name)
+            return self._ctx._wrap(getattr(self._base, name))
 
     def __setattr__(self, name, value):
         if name.startswith('_'): return super().__setattr__(name, value)

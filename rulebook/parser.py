@@ -193,18 +193,29 @@ class Parser:
 
         if not tokens: self.syntax_error("Empty expression")
 
+        debug('parse_pycode BEFORE: tokens =', tokens)
+        src = prepend + untokenize(tokens) + append
+        debug('parse_pycode BEFORE: untokenized to\n    |' + src.replace('\n', '\n    |'))
+
         first_line = tokens[0].start[0]
+        first_indent = tokens[0].start[1]
+
+        def fix_col(col):
+            col -= first_indent
+            if col < 0: col = 0
+            return col
 
         for idx in range(len(tokens)):
             tok = tokens[idx]
             newtok = list(tok)
-            newtok[2] = (tok.start[0] - first_line + 1, 0 if idx==0 else tok.start[1])
-            newtok[3] = (tok.end[0] - first_line + 1, 0 if idx==0 else tok.end[1])
+            if tok.type == t.INDENT:
+                newtok[1] = ' '*(len(tok.string) - first_indent)
+            newtok[2] = (tok.start[0] - first_line + 1, fix_col(tok.start[1]))
+            newtok[3] = (tok.end[0] - first_line + 1, fix_col(tok.end[1]))
             tokens[idx] = TokenInfo(*newtok)
 
         debug('parse_pycode: tokens =', tokens)
         src = prepend + untokenize(tokens) + append
-
         debug('parse_pycode: untokenized to\n    |' + src.replace('\n', '\n    |'))
 
         node = pyast.parse(src, self.filename, mode).body
@@ -233,7 +244,6 @@ class Parser:
             return rbkast.For(pynode.target, pynode.iter, body)
         elif self.match(self.ENTERLEAVE_KEYWORDS):
             event = self.eat().string
-            self.eat()
             self.eat(':')
             body = self.parse_pybody()
             return rbkast.EnterLeave(event, body)
