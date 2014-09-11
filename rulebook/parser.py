@@ -45,8 +45,10 @@ class Parser:
 
     KW_PRIO = (t.NAME, 'prio')
     KW_IF = (t.NAME, 'if')
+    KW_ELSE = (t.NAME, 'else')
     KW_FOR = (t.NAME, 'for')
     ENTERLEAVE_KEYWORDS = [ (t.NAME, kw) for kw in ('enter', 'leave', 'c_enter', 'c_leave') ]
+    IMPORT_KEYWORDS = [ (t.NAME, 'import'), (t.NAME, 'from') ]
     KW_SET = (t.NAME, 'set')
 
     in_simple_body = False
@@ -112,49 +114,54 @@ class Parser:
 
     def eat_pycode(self, endtoks):
         """Eat a Python expression, statement or block (depending on `endtoks`)"""
-        ret = []
-        parens = [] # A stack of open parentheses and other tookens that come in pairs.
-                    # The expression cannot end until all of them are closed.
-                    # This allows corect handling of e.g. ':'s inside  ``{'key': 'val'}``
-                    # so that they don't terminate the expession.
-                    #
-                    # NB: This is not perfect. It doesn't correctly parse e.g.
-                    # the expression in  ``if lambda f: None:``. You probably shouldn't
-                    # write code like that anyway ;-). And if you must, parentheses are
-                    # your friend).
-        while True:
-            # NB: Newlines and indentaion INSIDE expressions (due to explicit and implicit
-            # line continuations) DOES NOT generate NEWLINE, INDENT or DEDENT tokens.
-            # E.g.:
-            #     $ cat >/tmp/x.py
-            #     my_function(first_very_long_argument, second_very_long_argument,
-            #                     third_very_long_argument)
-            #     $ python -m tokenize /tmp/x.py
-            #     0,0-0,0:            ENCODING       'utf-8'
-            #     1,0-1,11:           NAME           'my_function'
-            #     1,11-1,12:          OP             '('
-            #     1,12-1,36:          NAME           'first_very_long_argument'
-            #     1,36-1,37:          OP             ','
-            #     1,38-1,63:          NAME           'second_very_long_argument'
-            #     1,63-1,64:          OP             ','
-            #     1,64-1,65:          NL             '\n'
-            #     2,17-2,41:          NAME           'third_very_long_argument'
-            #     2,41-2,42:          OP             ')'
-            #     2,42-2,43:          NEWLINE        '\n'
-            #     3,0-3,0:            ENDMARKER      ''
-            # Therefore it's safe to say that an expression never contains the
-            # aforementioned tokens.
-            if self.match(endtoks) and not parens:
-                # The end token (e.g. a ':') is not a part of the expr, don't eat it)
-                break
-            for opening, closing in self.PY_BALANCE.items():
-                if self.match(opening):
-                    parens.append(closing)
+        orig_ignore = self.IGNORE
+        self.IGNORE = []
+        try:
+            ret = []
+            parens = [] # A stack of open parentheses and other tookens that come in pairs.
+                        # The expression cannot end until all of them are closed.
+                        # This allows corect handling of e.g. ':'s inside  ``{'key': 'val'}``
+                        # so that they don't terminate the expession.
+                        #
+                        # NB: This is not perfect. It doesn't correctly parse e.g.
+                        # the expression in  ``if lambda f: None:``. You probably shouldn't
+                        # write code like that anyway ;-). And if you must, parentheses are
+                        # your friend).
+            while True:
+                # NB: Newlines and indentaion INSIDE expressions (due to explicit and implicit
+                # line continuations) DOES NOT generate NEWLINE, INDENT or DEDENT tokens.
+                # E.g.:
+                #     $ cat >/tmp/x.py
+                #     my_function(first_very_long_argument, second_very_long_argument,
+                #                     third_very_long_argument)
+                #     $ python -m tokenize /tmp/x.py
+                #     0,0-0,0:            ENCODING       'utf-8'
+                #     1,0-1,11:           NAME           'my_function'
+                #     1,11-1,12:          OP             '('
+                #     1,12-1,36:          NAME           'first_very_long_argument'
+                #     1,36-1,37:          OP             ','
+                #     1,38-1,63:          NAME           'second_very_long_argument'
+                #     1,63-1,64:          OP             ','
+                #     1,64-1,65:          NL             '\n'
+                #     2,17-2,41:          NAME           'third_very_long_argument'
+                #     2,41-2,42:          OP             ')'
+                #     2,42-2,43:          NEWLINE        '\n'
+                #     3,0-3,0:            ENDMARKER      ''
+                # Therefore it's safe to say that an expression never contains the
+                # aforementioned tokens.
+                if self.match(endtoks) and not parens:
+                    # The end token (e.g. a ':') is not a part of the expr, don't eat it)
                     break
-            else:
-                if parens and self.match(parens[-1]):
-                    parens.pop()
-            ret.append(self.eat())
+                for opening, closing in self.PY_BALANCE.items():
+                    if self.match(opening):
+                        parens.append(closing)
+                        break
+                else:
+                    if parens and self.match(parens[-1]):
+                        parens.pop()
+                ret.append(self.eat())
+        finally:
+            self.IGNORE = orig_ignore
         return ret
 
     def parse_pycode(self, endtoks, mode, *, prepend='', append=''):
@@ -193,9 +200,9 @@ class Parser:
 
         if not tokens: self.syntax_error("Empty expression")
 
-        debug('parse_pycode BEFORE: tokens =', tokens)
-        src = prepend + untokenize(tokens) + append
-        debug('parse_pycode BEFORE: untokenized to\n    |' + src.replace('\n', '\n    |'))
+        #debug('parse_pycode BEFORE: tokens =', tokens)
+        #src = prepend + untokenize(tokens) + append
+        #debug('parse_pycode BEFORE: untokenized to\n    |' + src.replace('\n', '\n    |'))
 
         first_line = tokens[0].start[0]
         first_indent = tokens[0].start[1]
@@ -233,7 +240,13 @@ class Parser:
             expr = self.parse_pycode([':', t.NEWLINE], 'eval')
             self.eat(':') # if it stopped at NEWLINE, this throws SyntaxError
             body = self.parse_body()
-            return rbkast.If(expr, body)
+            if self.match(self.KW_ELSE):
+                self.eat()
+                self.eat(':')
+                orelse = self.parse_body()
+            else:
+                orelse = None
+            return rbkast.If(expr, body, orelse)
         elif self.match(self.KW_FOR):
             # (Ab)uses Python to parse the whole `for` header so that we don't
             # have to bother with correctly splitting the individual parts,
@@ -247,6 +260,9 @@ class Parser:
             self.eat(':')
             body = self.parse_pybody()
             return rbkast.EnterLeave(event, body)
+        elif self.match(self.IMPORT_KEYWORDS):
+            pynode = self.parse_pycode([t.NEWLINE, t.DEDENT], 'exec')[0]
+            return rbkast.EnterLeave('enter', [pynode])
         elif self.match(self.KW_SET):
             self.eat()
             what = self.eat(t.NAME).string

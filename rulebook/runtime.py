@@ -93,7 +93,9 @@ class Context:
             return obj
 
     def _wrap(self, obj):
-        if isinstance(obj, RuleAbider):
+        if isinstance(obj, ObjectWrapper):
+            return obj
+        elif isinstance(obj, RuleAbider):
             return ObjectWrapper(self, obj)
         else:
             if not isinstance(obj, self.UNTRACKED):
@@ -115,7 +117,7 @@ class Context:
         return ident
 
     def remove_value(self, target, ident):
-        if isinstance(target[0], ObjectWrapper): raise TypeError("No wrappers in valueset calls!")
+        target = (self._unwrap(target[0]),) + target[1:]
         try:
             del self._valuesets.setdefault(target, {})[ident]
         except KeyError:
@@ -235,24 +237,42 @@ class Context:
         self.in_transaction = True
 
     def process_events(self):
-        in_trans = self.in_transaction
-        if not in_trans: self.begin()
-        cnt = 0
-        while self._queue:
-            target = self._queue.popleft()
-            cnt += 1
-            for func in self._watchers.get(target, {}).values():
-                func(target)
+        if self._processing: raise RuntimeError("Nested process_events call")
+        logger.debug('PROCESS_BEGIN')
+        self._processing = True
+        try:
+            in_trans = self.in_transaction
+            if not in_trans: self.begin()
+            cnt = 0
+            while self._queue:
+                target = self._queue.popleft()
+                cnt += 1
+                for func in self._watchers.get(target, {}).values():
+                    func(target)
 
-            if cnt > self.MAX_CHAIN:
-                raise RuntimeError("Maximum number of transaction events exceeded"
-                        " (probable reason: oscillating configuration). Current: %r, next 10: %r"
-                        % (target, self._queue[:10]))
-        if not in_trans: self.commit()
+                if cnt > self.MAX_CHAIN:
+                    raise RuntimeError("Maximum number of transaction events exceeded"
+                            " (probable reason: oscillating configuration). Current: %r, next 10: %r"
+                            % (target, self._queue[:10]))
+            if not in_trans: self.commit()
+        except:
+            # XXX temporary workaround for broken exception handling in Network Secretary
+            # TODO remove
+            import traceback
+            traceback.print_exc()
+            traceback.print_stack()
+            sys.exit(1)
+        finally:
+            self._processing = False
+            logger.debug('PROCESS_END')
 
     def notify_change(self, target, external=True):
-        logger.debug('NOTIFY_%s %r', 'EXT' if external else 'INT', target)
-        if target in self._inhibit_cnt: return
+        logger.debug('NOTIFY_%s %r in_trans=%d processing=%d',
+                'EXT' if external else 'INT', target, self.in_transaction,
+                self._processing)
+        if target in self._inhibit_cnt:
+            logger.debug('...inhibit')
+            return
         self._queue.append(target)
         if not self._processing:
             self.process_events()
@@ -296,7 +316,7 @@ class NamespaceOverlay(object):
     def __getattr__(self, name):
         if name.startswith('_'): raise AttributeError(name)
         if name in self._overlay:
-            return self._overlay[name]
+            return self._ctx._wrap(self._overlay[name])
         else:
             return self._ctx._wrap(getattr(self._base, name))
 
@@ -308,6 +328,29 @@ class NamespaceOverlay(object):
         else:
             setattr(self._base, name, value)
         #self._changed(name)
+
+class LocalNamespace(object):
+    def __init__(self, ctx, base):
+        self._ctx = ctx
+        self._base = base
+        self._locals = {}
+        self._globals = set()
+
+    def __setattr__(self, name, value):
+        if name.startswith('_'): return super().__setattr__(name, value)
+        if name in self._globals:
+            setattr(self._base, name, value)
+        else:
+            self._locals[name] = self._ctx._unwrap(value)
+
+    def __getattr__(self, name):
+        if name.startswith('_'): raise AttributeError(name)
+        if name in self._locals:
+            return self._ctx._wrap(self._locals[name])
+        else:
+            return self._ctx._wrap(getattr(self._base, name))
+
+
 
 class Directive(WithFields):
     def __init__(self, ctx, *args, **kw):

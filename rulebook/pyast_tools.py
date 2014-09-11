@@ -17,6 +17,24 @@ class EnhancedVisitor(pyast.NodeVisitor):
         else:
             return super().generic_visit(node)
 
+def flatten(array):
+    res = []
+    for itm in array:
+        if isinstance(itm, (list, tuple)):
+            res.extend(flatten(itm))
+        else:
+            res.append(itm)
+    return res
+
+class EnhancedTransformer(pyast.NodeTransformer):
+    def generic_visit(self, node):
+        if isinstance(node, (list, tuple)):
+            r = [ self.visit(sub) for sub in node ]
+            r = flatten(r)
+            r = [ x for x in r if x is not None ]
+            return r
+        else:
+            return super().generic_visit(node)
 
 class _LocateDefVisitor(EnhancedVisitor):
     def __init__(self, lineno):

@@ -28,6 +28,61 @@ def _nsify(node, base='N', isdict=False):
                 return self.generic_visit(node)
     return _NsifyTransformer().visit(node)
 
+
+class _ImportTransformer(pyast_tools.EnhancedTransformer):
+    def visit(self, node):
+        if isinstance(node, (pyast.Import, pyast.ImportFrom)):
+            r = []
+            if isinstance(node, pyast.Import):
+                for alias in node.names:
+                    if alias.asname:
+                        @pyast_tools.interpolate(ASNAME=alias.asname, NAME=alias.name)
+                        @pyast_tools.single
+                        @pyast_tools.get_ast
+                        def pycode():
+                            import importlib
+                            N.ASNAME = ASNAME = importlib.import_module('NAME')
+                    else:
+                        @pyast_tools.interpolate(NAME=alias.name, TOP=alias.name.split('.')[0])
+                        @pyast_tools.single
+                        @pyast_tools.get_ast
+                        def pycode():
+                            N.TOP = TOP = __import__('NAME')
+                    r.append(pycode)
+            elif isinstance(node, pyast.ImportFrom):
+                for alias in node.names:
+                    @pyast_tools.interpolate(MOD=node.module, ASNAME=alias.asname or alias.name, NAME=alias.name)
+                    @pyast_tools.single
+                    @pyast_tools.get_ast
+                    def pycode():
+                        import importlib
+                        N.ASNAME = ASNAME = __import__('MOD', None, None, ('NAME',)).NAME
+                    r.append(pycode)
+            return r
+            #if len(r) == 1:
+            #    return r[0]
+            #else:
+            #    # HACK: use "if 1:" to make multiple statements into one node
+            #    return pyast.If(pyast.Num(1), r)
+        else:
+            return self.generic_visit(node)
+
+class _FunctionTransformer(object):
+    def visit(self, node):
+        if isinstance(node, pyast.FunctionDef):
+            tmpname = self.gen_name('pyfunc')
+            origname = node.name
+            node.name = tmpname
+            @pyast_tools.interpolate(MOD=node.module, ASNAME=alias.asname or alias.name, NAME=alias.name)
+            @pyast_tools.single
+            @pyast_tools.get_ast
+            def pycode():
+                def _inner(N):
+                    NODE
+                N.ORIGNAME = TMPNAME
+        else:
+            return self.generic_visit(node)
+
 class Compiler:
     CTX = pyast_tools.dotted('C')
     NS_SIG = pyast.arguments([pyast.arg('N', None)],None,[],[],None, [])
@@ -59,6 +114,11 @@ class Compiler:
                 src = astunparse.unparse(expr).strip()
                 r = pyast_tools.build_call('R._LambdaWithSource', r, src)
         return r
+
+    def _transform_pycode(self, node):
+        node = _nsify(node)
+        node = _ImportTransformer().visit(node)
+        return node
 
     def _xform_assign(self, node):
         lhs = _nsify(node.lhs)
@@ -96,7 +156,9 @@ class Compiler:
 
     def _xform_if(self, node):
         return self._build_directive('If', self._wrap_lambda(_nsify(node.cond)),
-                                        self.transform_node(node.body))
+                                        self.transform_node(node.body),
+                                        self.transform_node(node.orelse) if node.orelse is not None
+                                        else None)
 
     def _xform_for(self, node):
         olddefs = self.defs
@@ -131,7 +193,13 @@ class Compiler:
 
 
     def _xform_enterleave(self, node):
-        body = _nsify(node.body)
+        # HACK: do not nsify the enter/exit block. Allows them to use local variables
+        #       and define functions in a reasonable manner. They can always access
+        #       the namespace thru ``N.``. Plus, the might want to access Context
+        #       methods, e.g. ``add_value``.
+        #body = self._transform_pycode(node.body)
+        #body = _ImportTransformer().visit(node.body)
+        body = node.body
         name = self.gen_name(node.event)
         func = pyast.FunctionDef(name, pyast_tools.EMPTY_SIG, body, [], None)
         self.defs.append(func)

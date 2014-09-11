@@ -86,7 +86,7 @@ class Block(Node):
 
 class If(Node):
     FIELDS_REQ = ['cond', 'body']
-    FIELDS_OPT = ['else']
+    FIELDS_OPT = ['orelse']
 
 class For(Node):
     FIELDS_REQ = ['target', 'iter', 'body']
