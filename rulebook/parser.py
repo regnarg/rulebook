@@ -283,15 +283,17 @@ class Parser:
                 lhs.ctx = pyast.Store()
                 rhs = self.parse_pycode(stoppers, 'eval')
                 node = rbkast.Assign(lhs, rhs, prio = self.defaults['prio'])
+                while not self.match([t.NEWLINE, t.DEDENT]):
+                    if self.match(self.KW_PRIO):
+                        self.eat()
+                        ## prio = int(pyast.literal_eval(self.parse_pycode(stoppers, 'eval')))
+                        node.prio = self.parse_pycode(stoppers, 'eval')
+                    else:
+                        self.syntax_error("Unexpected token")
+            elif self.match([t.NEWLINE, t.DEDENT]) and isinstance(expr, pyast.Call):
+                node = rbkast.CustomDirective(expr)
             else:
-                raise NotImplementedError
-            while not self.match([t.NEWLINE, t.DEDENT]):
-                if self.match(self.KW_PRIO):
-                    self.eat()
-                    ## prio = int(pyast.literal_eval(self.parse_pycode(stoppers, 'eval')))
-                    node.prio = self.parse_pycode(stoppers, 'eval')
-                else:
-                    self.syntax_error("Unexpected token")
+                self.syntax_error("Unexpected token")
             if self.match(t.NEWLINE): self.eat()
             return node
 

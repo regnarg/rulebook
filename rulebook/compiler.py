@@ -40,13 +40,13 @@ class _ImportTransformer(pyast_tools.EnhancedTransformer):
                         @pyast_tools.get_ast
                         def pycode():
                             import importlib
-                            N.ASNAME = N_ASNAME = importlib.import_module('NAME')
+                            N.ASNAME = globals()['ASNAME'] = importlib.import_module('NAME')
                     else:
                         top = alias.name.split('.')[0]
                         @pyast_tools.interpolate(NAME=alias.name, TOP=top, N_TOP=pyast.Name(top, pyast.Store()))
                         @pyast_tools.get_ast
                         def pycode():
-                            N.TOP = N_TOP = __import__('NAME')
+                            N.TOP = globals()['TOP'] = __import__('NAME')
                     r += pycode
             elif isinstance(node, pyast.ImportFrom):
                 for alias in node.names:
@@ -55,7 +55,7 @@ class _ImportTransformer(pyast_tools.EnhancedTransformer):
                     @pyast_tools.get_ast
                     def pycode():
                         import importlib
-                        N.ASNAME = N_ASNAME = __import__('MOD', None, None, ('NAME',)).NAME
+                        N.ASNAME = globals()['ASNAME'] = __import__('MOD', None, None, ('NAME',)).NAME
                     r += pycode
             return r
             #if len(r) == 1:
@@ -148,6 +148,9 @@ class Compiler:
                                         subtype, subval, self._wrap_lambda(rhs),
                                         prio=self._wrap_lambda(_nsify(node.prio)))
         return pynode
+
+    def _xform_customdirective(self, node):
+        return node.expr
 
     def _xform_block(self, node):
         pynodes = [ self.transform_node(directive) for directive in node.body ]

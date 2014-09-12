@@ -44,6 +44,19 @@ class ObjectWrapper:
     def __repr__(self):
         return '<OW:%s at 0x%x>'%(self._rbk_obj, id(self))
 
+    # This is ugly. Is there a language with less horrible dynamic code creation?
+    for _tmp_meth in ['__eq__', '__ne__', '__lt__', '__gt__', '__le__', '__ge__']:
+        def _tmp_mkfunc(meth=_tmp_meth):
+            def _tmp_func(self, other):
+                a = self._rbk_obj
+                if isinstance(other, ObjectWrapper): b = other._rbk_obj
+                else: b = other
+                return getattr(a, meth)(b)
+            _tmp_func.__name__ = meth
+            return _tmp_func
+        locals()[_tmp_meth] = _tmp_mkfunc()
+    del _tmp_meth, _tmp_mkfunc
+
 def get_effective_value(vals):
     """Given a value set, computes the effective value, i.e. the one
     with highest priority. If more values have the same priority, the
@@ -158,17 +171,30 @@ class Context:
 
         if vals:
             eff = get_effective_value(vals)
+            if self.in_transaction:
+                self._uncommitted[target] = eff
+            else:
+                self._do_set(target, eff)
+            self.notify_change(target, external=False)
         else:
             # If the value set is empty, the resulting value is undefined
             # (pretty much like a floating line in a circuit).
-            # Currently, we assign None (mainly for garbage-collector's sake; we used to
-            # keep the last value before)
-            eff = None
-        if self.in_transaction:
-            self._uncommitted[target] = eff
-        else:
-            self._do_set(target, eff)
-        self.notify_change(target, external=False)
+            # For now, we just keep the last value.
+            # The best solution is to always include a low-priority assignment
+            # with some sane default value in the root of your rulebook.
+            #
+            # Especially when you assign complex objects using Rulebook,
+            # it is recommended to have a fallback rule configured that
+            # resets the given target back to None when the object should
+            # no longer be here. E.g.:
+            #
+            #     something.someattr = None prio -1000
+            #     if <some-condition>:
+            #         something.someattr = MyComplexObject()
+            #
+            # Without the first line, the object would fail to be garbage collected
+            # when <some-condition> ceases to hold.
+            pass
 
     ### }}} ###
 
@@ -286,7 +312,25 @@ class Context:
         for target in targets:
             obj, *sub = target
             if isinstance(obj, ObjectWrapper): raise TypeError("Cannot track ``ObjectWrapper``s")
-            self._watchers.setdefault(target, {})[ident] = func
+            # HACK ALERT!
+            # Consider this code:
+            # if iface.dhcp_client_obj.lease:
+            #     iface.addrs += [iface.dhcp_client_obj.lease.addr]
+            # Now when `lease` becomes `None`, it triggers watches for both the If
+            # and the Assign directive. However, we need the If-watch to get processed
+            # first so that it can disable the Assign directive. If the order is reversed,
+            # we end up with an AttributeError.
+            #
+            # The correct rule would be something like "outer directives have precedence
+            # when executing watches". But directives currently don't know their "outer-ness".
+            # As a workaround, we execute watches in order of insertion. This requires that
+            # directives like `if` and `for` install their watchsets BEFORE activating their
+            # bodies. This should work even when the watchsets change during execution:
+            # the outer directive gets the notification first, installs new watches first
+            # and thus will also get the next one first.
+            #
+            # But it's VERY fragile and should be done away with soon.
+            self._watchers.setdefault(target, collections.OrderedDict())[ident] = func
             if isinstance(obj, RuleAbider):
                 obj._rbk_trackers.add(self.notify_change)
             else:
@@ -414,11 +458,11 @@ class If(Directive):
         if not (self.active or activating): return
         val, deps = self.ctx.tracked_eval(self.cond)
         val = bool(val)
+        self.ctx.add_watchset(deps,    self._on_changed, id(self))
         logger.debug('IFCHG %s %s', self, val)
         self.body.set_active(val)
         if self.orelse:
             self.orelse.set_active(not val)
-        self.ctx.add_watchset(deps,    self._on_changed, id(self))
 
 class For(Directive):
     FIELDS_REQ = ['iter', 'body_factory']
@@ -558,3 +602,5 @@ class _LambdaWithSource:
         return self.func(*a, **kw)
     def __repr__(self):
         return '<L:%s>' % self.src
+
+### DIRECTIVES WITHOUT A SPECIAL SYNTAX (used with CustomDirective) ###

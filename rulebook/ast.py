@@ -95,6 +95,9 @@ class Assign(Node):
     FIELDS_REQ = ['lhs', 'rhs']
     FIELDS_OPT = ['prio']
 
+class CustomDirective(Node):
+    FIELDS_REQ = ['expr']
+
 class Rulebook(Node):
     FIELDS_REQ = ['body']
 
