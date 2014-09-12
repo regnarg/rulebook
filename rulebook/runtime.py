@@ -92,6 +92,8 @@ class Context:
         self.in_transaction = False
         self._processing = False
 
+        self.commit_hooks = []
+
         self.ns = Namespace()
         self.nswrap = ObjectWrapper(self, self.ns)
 
@@ -251,9 +253,19 @@ class Context:
         for dir in self._uncommitted_directives:
             logger.debug('COMMIT_DIR %r', dir)
             dir.commit()
+        commit_objs = {}
         for target, val in self._uncommitted.items():
+            if hasattr(target[0], '_rbk_commit'):
+                commit_objs[id(target[0])] = target[0]
             logger.debug('COMMIT_VAL %r %r', target, val)
             self._do_set(target, val)
+        commit_objs = sorted(commit_objs.values(), key=lambda obj: getattr(obj, '_rbk_commit_order', 0))
+        for obj in commit_objs:
+            logger.debug('COMMIT_OBJ %r', obj)
+            obj._rbk_commit()
+        for hook in self.commit_hooks:
+            logger.debug('COMMIT_HOOK %r', hook)
+            hook(commit_objs)
         self._uncommitted = ObjectKeyDict()
         self._uncommitted_directives = ObjectKeyDict()
         self.in_transaction = False
@@ -312,24 +324,6 @@ class Context:
         for target in targets:
             obj, *sub = target
             if isinstance(obj, ObjectWrapper): raise TypeError("Cannot track ``ObjectWrapper``s")
-            # HACK ALERT!
-            # Consider this code:
-            # if iface.dhcp_client_obj.lease:
-            #     iface.addrs += [iface.dhcp_client_obj.lease.addr]
-            # Now when `lease` becomes `None`, it triggers watches for both the If
-            # and the Assign directive. However, we need the If-watch to get processed
-            # first so that it can disable the Assign directive. If the order is reversed,
-            # we end up with an AttributeError.
-            #
-            # The correct rule would be something like "outer directives have precedence
-            # when executing watches". But directives currently don't know their "outer-ness".
-            # As a workaround, we execute watches in order of insertion. This requires that
-            # directives like `if` and `for` install their watchsets BEFORE activating their
-            # bodies. This should work even when the watchsets change during execution:
-            # the outer directive gets the notification first, installs new watches first
-            # and thus will also get the next one first.
-            #
-            # But it's VERY fragile and should be done away with soon.
             self._watchers.setdefault(target, collections.OrderedDict())[ident] = func
             if isinstance(obj, RuleAbider):
                 obj._rbk_trackers.add(self.notify_change)
