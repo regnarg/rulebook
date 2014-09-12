@@ -98,6 +98,9 @@ class Assign(Node):
 class Rulebook(Node):
     FIELDS_REQ = ['body']
 
+class Import(Node):
+    FIELDS_REQ = ['pynode']
+
 class EnterLeave(Node):
     ENTER = 'enter'
     LEAVE = 'leave'

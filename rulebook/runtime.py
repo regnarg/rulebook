@@ -158,16 +158,17 @@ class Context:
 
         if vals:
             eff = get_effective_value(vals)
-            if self.in_transaction:
-                self._uncommitted[target] = eff
-            else:
-                self._do_set(target, eff)
-            self.notify_change(target, external=False)
         else:
             # If the value set is empty, the resulting value is undefined
             # (pretty much like a floating line in a circuit).
-            # Currently, the last value set is kept but this may change.
-            pass
+            # Currently, we assign None (mainly for garbage-collector's sake; we used to
+            # keep the last value before)
+            eff = None
+        if self.in_transaction:
+            self._uncommitted[target] = eff
+        else:
+            self._do_set(target, eff)
+        self.notify_change(target, external=False)
 
     ### }}} ###
 
@@ -247,7 +248,8 @@ class Context:
             while self._queue:
                 target = self._queue.popleft()
                 cnt += 1
-                for func in self._watchers.get(target, {}).values():
+                # list() is necessary as watchers might change during iteration
+                for func in list(self._watchers.get(target, {}).values()):
                     func(target)
 
                 if cnt > self.MAX_CHAIN:
@@ -388,8 +390,12 @@ class Directive(WithFields):
 class Block(Directive):
     FIELDS_REQ = ['body']
     def _set_active(self, active):
-        for directive in self.body:
-            directive.set_active(active)
+        if active:
+            for directive in self.body:
+                directive.set_active(True)
+        else:
+            for directive in reversed(self.body):
+                directive.set_active(False)
 
 
 class If(Directive):

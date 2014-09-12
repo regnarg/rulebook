@@ -262,7 +262,7 @@ class Parser:
             return rbkast.EnterLeave(event, body)
         elif self.match(self.IMPORT_KEYWORDS):
             pynode = self.parse_pycode([t.NEWLINE, t.DEDENT], 'exec')[0]
-            return rbkast.EnterLeave('enter', [pynode])
+            return rbkast.Import(pynode)
         elif self.match(self.KW_SET):
             self.eat()
             what = self.eat(t.NAME).string

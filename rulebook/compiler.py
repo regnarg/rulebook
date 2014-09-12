@@ -36,28 +36,27 @@ class _ImportTransformer(pyast_tools.EnhancedTransformer):
             if isinstance(node, pyast.Import):
                 for alias in node.names:
                     if alias.asname:
-                        @pyast_tools.interpolate(ASNAME=alias.asname, NAME=alias.name)
-                        @pyast_tools.single
+                        @pyast_tools.interpolate(ASNAME=alias.asname, NAME=alias.name, N_ASNAME=pyast.Name(alias.asname, pyast.Store()))
                         @pyast_tools.get_ast
                         def pycode():
                             import importlib
-                            N.ASNAME = ASNAME = importlib.import_module('NAME')
+                            N.ASNAME = N_ASNAME = importlib.import_module('NAME')
                     else:
-                        @pyast_tools.interpolate(NAME=alias.name, TOP=alias.name.split('.')[0])
-                        @pyast_tools.single
+                        top = alias.name.split('.')[0]
+                        @pyast_tools.interpolate(NAME=alias.name, TOP=top, N_TOP=pyast.Name(top, pyast.Store()))
                         @pyast_tools.get_ast
                         def pycode():
-                            N.TOP = TOP = __import__('NAME')
-                    r.append(pycode)
+                            N.TOP = N_TOP = __import__('NAME')
+                    r += pycode
             elif isinstance(node, pyast.ImportFrom):
                 for alias in node.names:
-                    @pyast_tools.interpolate(MOD=node.module, ASNAME=alias.asname or alias.name, NAME=alias.name)
-                    @pyast_tools.single
+                    asname = alias.asname or alias.name
+                    @pyast_tools.interpolate(MOD=node.module, ASNAME=asname, NAME=alias.name, N_ASNAME=pyast.Name(asname, pyast.Store()))
                     @pyast_tools.get_ast
                     def pycode():
                         import importlib
-                        N.ASNAME = ASNAME = __import__('MOD', None, None, ('NAME',)).NAME
-                    r.append(pycode)
+                        N.ASNAME = N_ASNAME = __import__('MOD', None, None, ('NAME',)).NAME
+                    r += pycode
             return r
             #if len(r) == 1:
             #    return r[0]
@@ -204,6 +203,10 @@ class Compiler:
         func = pyast.FunctionDef(name, pyast_tools.EMPTY_SIG, body, [], None)
         self.defs.append(func)
         return self._build_directive('EnterLeave', node.event, pyast_tools.dotted(name))
+
+    def _xform_import(self, node):
+        pycode = _ImportTransformer().visit(node.pynode)
+        return self.transform_node(rbkast.EnterLeave('enter', pycode))
 
     def _xform_rulebook(self, node):
         self.defs = []
