@@ -93,7 +93,7 @@ class For(Node):
 
 class Assign(Node):
     FIELDS_REQ = ['lhs', 'rhs']
-    FIELDS_OPT = ['prio']
+    FIELDS_OPT = ['prio', 'comb']
 
 class CustomDirective(Node):
     FIELDS_REQ = ['expr']

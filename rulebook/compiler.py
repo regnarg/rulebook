@@ -144,9 +144,13 @@ class Compiler:
             # I was surprised just like you; try this: ``[x,y] = [4,2]``).
             raise NotImplementedError("Unsupported assignment LHS: %s", pyast.dump(lhs))
 
+        kw = {}
+        if node.comb: kw['comb'] = node.comb
+
         pynode = self._build_directive('Assign', self._wrap_lambda(obj),
                                         subtype, subval, self._wrap_lambda(rhs),
-                                        prio=self._wrap_lambda(_nsify(node.prio)))
+                                        prio=self._wrap_lambda(_nsify(node.prio)),
+                                        **kw)
         return pynode
 
     def _xform_customdirective(self, node):
@@ -218,6 +222,7 @@ class Compiler:
         @pyast_tools.get_ast
         def module_body():
             from rulebook import runtime as R
+            import operator
             def init(ctx):
                 C = ctx
                 N = ctx.nswrap

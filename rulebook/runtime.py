@@ -61,15 +61,24 @@ def get_effective_value(vals):
     """Given a value set, computes the effective value, i.e. the one
     with highest priority. If more values have the same priority, the
     result is undefined."""
-    # TODO: relative values
-    return  max(vals.values(), key=lambda x: x[1])[0]
+    lst = sorted(vals.values(), key=lambda x: -x[1])
+    anchor = 0 # The highest priority non-relative value (with comb=None)
+    while anchor < len(lst) and lst[anchor][2]:
+        anchor += 1
+    if lst[anchor][2]:
+        ## TODO we should say which one :-D
+        raise RuntimeError("Value set contains only relative values")
+    val = lst[anchor][0]
+    for (relval, _, comb) in reversed(lst[:anchor]):
+        val = comb(val, relval)
+    return val
 
 class Context:
     # The maximum length of an event chain before the rulebook is considered oscillating
     # and an exception is raised.
     MAX_CHAIN = 1000
     # Types that don't need change tracking -- simple immutable builtin types
-    UNTRACKED = (str, bool, int, tuple, float, complex, type(None))
+    UNTRACKED = (str, bool, int, tuple, frozenset, float, complex, type(None))
     def __init__(self):
         self._last_id = 0
         self._readtrack_stack = []
@@ -120,13 +129,13 @@ class Context:
     ### VALUE SET MANIPULATION {{{ ###
 
 
-    def add_value(self, target, val, prio, ident=None):
+    def add_value(self, target, val, prio, ident=None, comb=None):
         val = self._unwrap(val)
         target = (self._unwrap(target[0]),) + target[1:]
         prio = self._unwrap(prio)
         if ident is None: ident = self.new_id()
 
-        self._valuesets.setdefault(target, {})[ident] = (val, prio)
+        self._valuesets.setdefault(target, {})[ident] = (val, prio, comb)
         self._value_set_changed(target)
 
         return ident
@@ -293,7 +302,7 @@ class Context:
                 if cnt > self.MAX_CHAIN:
                     raise RuntimeError("Maximum number of transaction events exceeded"
                             " (probable reason: oscillating configuration). Current: %r, next 10: %r"
-                            % (target, self._queue[:10]))
+                            % (target, list(self._queue)[:10]))
             if not in_trans: self.commit()
         except:
             # XXX temporary workaround for broken exception handling in Network Secretary
@@ -516,8 +525,10 @@ class EnterLeave(Directive):
             self.body()
 
 class Assign(Directive):
-    FIELDS_REQ = [ 'obj', 'subtype', 'subval', 'rhs', 'prio' ]
+    FIELDS_REQ = ['obj', 'subtype', 'subval', 'rhs', 'prio']
+    FIELDS_OPT = ['comb']
     cur_obj = None
+    comb = None
 
     def _set_active(self, active):
         logger.debug('%s %s', 'ACTIVATE' if active else 'DEACTIVATE', self)
@@ -570,7 +581,7 @@ class Assign(Directive):
             self._unset()
 
         target = (obj, self.subtype, self.subval)
-        self.ctx.add_value(target, val, prio, id(self))
+        self.ctx.add_value(target, val, prio, id(self), comb=self.comb)
         self.ctx.add_watchset(obj_deps + val_deps + prio_deps, self._on_changed, id(self))
         self.cur_obj = weakref.ref(obj)
 

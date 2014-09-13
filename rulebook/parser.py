@@ -6,6 +6,7 @@ from functools import partial
 from tokenize import tokenize,untokenize,TokenInfo
 import tokenize as t
 from . import ast as rbkast
+from . import pyast_tools
 import ast as pyast
 
 from .util import *
@@ -42,6 +43,7 @@ class Parser:
     # in ``parse_pycode`` for details.
     IGNORE = [t.ENCODING, t.NL, t.COMMENT]
     PY_BALANCE = {'(': ')', '[': ']', '{': '}', t.INDENT: t.DEDENT}
+    ASSIGN_OPS = ['=', '+=', '-=', '*=', '/=', '//=', '%=', '|=', '&=', '^=', '**=', '<<=', '>>=']
 
     KW_PRIO = (t.NAME, 'prio')
     KW_IF = (t.NAME, 'if')
@@ -272,17 +274,34 @@ class Parser:
                 self.syntax_error("Unknown `set` directive: '%s'" % what)
             return None
         else:
-            stoppers = [t.NEWLINE, t.DEDENT, self.KW_PRIO, '=']
+            stoppers = [t.NEWLINE, t.DEDENT, self.KW_PRIO] + self.ASSIGN_OPS
             expr = self.parse_pycode(stoppers, 'eval')
-            if self.match('='):
+            if self.match(self.ASSIGN_OPS):
                 # TODO multi-target assignments (x = y = 42)
-                self.eat()
+                op = self.eat().string
+                COMB = {
+                            '+=': 'operator.add',
+                            '-=': 'operator.sub',
+                            '*=': 'operator.mul',
+                            '/=': 'operator.truediv',
+                            '//=': 'operator.floordiv',
+                            '%=': 'operator.mod',
+                            '&=': 'operator.and_',
+                            '|=': 'operator.or_',
+                            '^=': 'operator.xor',
+                            '**=': 'operator.pow',
+                            '<<=': 'operator.lshift',
+                            '>>=': 'operator.rshift',
+                            '=': None
+                        }
                 lhs = expr
                 if not hasattr(lhs, 'ctx'):
                     self.syntax_error("Invalid lvalue")
                 lhs.ctx = pyast.Store()
                 rhs = self.parse_pycode(stoppers, 'eval')
-                node = rbkast.Assign(lhs, rhs, prio = self.defaults['prio'])
+                comb = COMB[op]
+                if comb: comb = pyast_tools.dotted(comb)
+                node = rbkast.Assign(lhs, rhs, prio = self.defaults['prio'], comb=comb)
                 while not self.match([t.NEWLINE, t.DEDENT]):
                     if self.match(self.KW_PRIO):
                         self.eat()
