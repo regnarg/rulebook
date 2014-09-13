@@ -475,14 +475,15 @@ class For(Directive):
     def _on_changed(self, *a, activating=False):
         if not (self.active or activating): return
         val, deps = self.ctx.tracked_eval(self.iter)
-        if isinstance(val, RuleAbider):
-            deps.append((val, 'iter', None))
+        if isinstance(self.ctx._unwrap(val), RuleAbider):
+            deps.append((self.ctx._unwrap(val), 'iter', None))
 
         self._set_items(val)
         self.ctx.add_watchset(deps,    self._on_changed, id(self))
 
 
     def _set_items(self, items):
+        items = [ self.ctx._unwrap(x) for x in items ]
         by_id = { id(x): x for x in items }
         new_ids = set(by_id.keys())
         old_ids = set(self.cur_items.keys())
