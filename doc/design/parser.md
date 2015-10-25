@@ -6,7 +6,12 @@ Python uses a C parser generated at compile time from the grammar definition fil
 in any way at runtime.
 
 See [our graph](py_gram_ext.pdf) for an overview of the parsing process and the APIs
-available to access it.
+available to access it. The meaning of the individual edge colors is as follows:
+
+  * blue -- a pure Python module
+  * green -- an extension module (implemented in C)
+  * red -- a Python-internal C API (not accessible from Python code)
+  * diamon arrowheads signify APIs that are naturally extensible with new grammar
 
 This leaves several options as to extending the language:
 
@@ -25,9 +30,9 @@ This leaves several options as to extending the language:
     a different Python version than the one currently installed, causing
     unexpected discrepancies. Also, keeping the parser up-to-date with upstream
     changes is a lot of unnecessary work, even when someone else does it for us
-    (noone guaranteed that they will keep on doing so).
+    (no one guarantees that they will keep on doing so).
 
-    [^1] It would suffice to reimplement the CST parsing step (which could be
+    It would suffice to reimplement the CST parsing step (which could be
     relatively cheap, perhaps reusing Python's ``Grammar.txt`` and a generic
     parsing engine) and feed the result to ``parser.compilest``. However, if
     for any reason we wanted to access the AST, we would either need a C extension

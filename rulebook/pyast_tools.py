@@ -237,7 +237,10 @@ def build_call(func, *args, **kw):
     if isinstance(func, str): func = dotted(func)
     args = [ ensure_ast(x) for x in args ]
     keywords = [ pyast.keyword(k, ensure_ast(v)) for k,v in kw.items() ]
-    node = pyast.Call(func, args, keywords, None, None)
+    if sys.hexversion >= 0x3050000:
+        node = pyast.Call(func, args, keywords)
+    else:
+        node = pyast.Call(func, args, keywords, None, None)
 
     return node
 

@@ -197,6 +197,15 @@ class Compiler:
         return self._build_directive('For', self._wrap_lambda(_nsify(node.iter)),
                                         pyast.Name(helper_name, pyast.Load()))
 
+    def _wrap_imperative(self, body, nprefix='x'):
+        """Wrap a block of imperative Python code, return an AST node representing
+        a callable that runs the said code."""
+
+        name = self.gen_name(nprefix)
+        func = pyast.FunctionDef(name, pyast_tools.EMPTY_SIG, body, [], None)
+        self.defs.append(func)
+        return pyast.Name(name, pyast.Load())
+
 
     def _xform_enterleave(self, node):
         # HACK: do not nsify the enter/exit block. Allows them to use local variables
@@ -205,11 +214,11 @@ class Compiler:
         #       methods, e.g. ``add_value``.
         #body = self._transform_pycode(node.body)
         #body = _ImportTransformer().visit(node.body)
-        body = node.body
-        name = self.gen_name(node.event)
-        func = pyast.FunctionDef(name, pyast_tools.EMPTY_SIG, body, [], None)
-        self.defs.append(func)
-        return self._build_directive('EnterLeave', node.event, pyast_tools.dotted(name))
+        return self._build_directive('EnterLeave', node.event, self._wrap_imperative(node.body))
+
+    def _xform_onchange(self, node):
+        return self._build_directive('OnChange', self._wrap_lambda(node.expr),
+                                     self._wrap_imperative(node.body))
 
     def _xform_import(self, node):
         pycode = _ImportTransformer().visit(node.pynode)

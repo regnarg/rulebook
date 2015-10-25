@@ -524,6 +524,57 @@ class EnterLeave(Directive):
                 or (self.event == 'c_leave' and not self.active)):
             self.body()
 
+class OnChange(Directive):
+    FIELDS_REQ = ['expr', 'body']
+    FILEDS_OPT = ['after_commit']
+
+    last_value = None
+
+    def _set_active(self, active):
+        if active:
+            self._maybe_changed(activating=True)
+        else:
+            self._unset()
+
+    def _unset(self):
+        logger.debug('UNSET %s', self)
+        if self.cur_obj is None: return
+        cur_obj = self.cur_obj()
+        if cur_obj is None: return
+        target = (cur_obj, self.subtype, self.subval)
+        logger.debug('UNSET2 %s', target)
+        self.ctx.remove_value(target, id(self))
+        self.ctx.remove_watchset(id(self))
+        self.cur_obj = None
+
+    def _maybe_changed(self, *a, activating=False):
+        if not (self.active or activating): return
+        obj, obj_deps = self.ctx.tracked_eval(self.obj)
+        val, val_deps    = self.ctx.tracked_eval(self.rhs)
+        if isinstance(obj, ObjectWrapper):
+            obj = obj._rbk_obj
+        if isinstance(val, ObjectWrapper):
+            val = val._rbk_obj
+        if self.prio:
+            prio, prio_deps    = self.ctx.tracked_eval(self.prio)
+        else:
+            prio, prio_deps = 0, []
+
+        if self.cur_obj is None: cur_obj = None
+        else: cur_obj = self.cur_obj()
+
+        logger.debug('CHANGED %s %s %s', self, cur_obj, obj)
+
+        if obj is not cur_obj:
+            # LHS changed, we must remove the attribute from the old object
+            # in addition to setting it on the new one
+            self._unset()
+
+        target = (obj, self.subtype, self.subval)
+        self.ctx.add_value(target, val, prio, id(self), comb=self.comb)
+        self.ctx.add_watchset(obj_deps + val_deps + prio_deps, self._maybe_changed, id(self))
+        self.cur_obj = weakref.ref(obj)
+
 class Assign(Directive):
     FIELDS_REQ = ['obj', 'subtype', 'subval', 'rhs', 'prio']
     FIELDS_OPT = ['comb']

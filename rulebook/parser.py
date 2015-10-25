@@ -49,6 +49,7 @@ class Parser:
     KW_IF = (t.NAME, 'if')
     KW_ELSE = (t.NAME, 'else')
     KW_FOR = (t.NAME, 'for')
+    ONCHANGE_KEYWORDS = [(t.NAME, 'onchange'), (t.NAME, 'c_onchange')]
     ENTERLEAVE_KEYWORDS = [ (t.NAME, kw) for kw in ('enter', 'leave', 'c_enter', 'c_leave') ]
     IMPORT_KEYWORDS = [ (t.NAME, 'import'), (t.NAME, 'from') ]
     KW_SET = (t.NAME, 'set')
@@ -273,6 +274,11 @@ class Parser:
             else:
                 self.syntax_error("Unknown `set` directive: '%s'" % what)
             return None
+        elif self.match(self.ONCHANGE_KEYWORDS):
+            expr = self.parse_pycode([t.NEWLINE, t.DEDENT, ':'], 'eval')
+            self.eat(':')
+            body = self.parse_pybody()
+            return rbkast.OnChange(expr, body)
         else:
             stoppers = [t.NEWLINE, t.DEDENT, self.KW_PRIO] + self.ASSIGN_OPS
             expr = self.parse_pycode(stoppers, 'eval')
